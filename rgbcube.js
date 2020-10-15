@@ -1,4 +1,6 @@
 
+window.onload = () => {
+
 const cube = [
     // Front face
     -1.0, -1.0,  1.0,
@@ -37,19 +39,20 @@ const cube = [
     -1.0,  1.0, -1.0,
 ];
 
+var forward  = vec3.fromValues(1, 0, 0);
+var up       = vec3.fromValues(0, 1, 0);
+var right    = vec3.fromValues(0, 0, 1);
+
 const vsSource = `
 
 attribute vec4 aVertexPosition;
-attribute vec4 aVertexColor;
-
 uniform mat4 uModelViewMatrix;
 uniform mat4 uProjectionMatrix;
-
 varying lowp vec4 vColor;
 
 void main() {
     gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-    vColor      = aVertexPosition*0.5+0.5;
+    vColor      = aVertexPosition*0.5 + 0.5;
 }
 
 `;
@@ -76,7 +79,7 @@ function loadShader(gl, type, source) {
     
     if ( !gl.getShaderParameter(shader, gl.COMPILE_STATUS) ) {
         
-        alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+        console.log('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
     }
@@ -115,6 +118,14 @@ function initgl() {
     gl.clearDepth(1.0);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
+    
+    const fieldOfView = 45 * Math.PI / 180;
+    const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+    const zNear = 0.1;
+    const zFar = 100.0;
+
+    mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+    mat4.rotateY(projectionMatrix, projectionMatrix, 3.14159);
 
     return [canvas, gl];
 }
@@ -151,43 +162,7 @@ function drawScene(gl, programInfo, buffers) {
 
     // Clear the canvas before we start drawing on it.
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    // Create a perspective matrix, a special matrix that is
-    // used to simulate the distortion of perspective in a camera.
-    // Our field of view is 45 degrees, with a width/height
-    // ratio that matches the display size of the canvas
-    // and we only want to see objects between 0.1 units
-    // and 100 units away from the camera.
-
-    const fieldOfView = 45 * Math.PI / 180; // in radians
-    const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-    const zNear = 0.1;
-    const zFar = 100.0;
-    const projectionMatrix = mat4.create();
-
-    // note: glmatrix.js always has the first argument
-    // as the destination to receive the result.
-    mat4.perspective(projectionMatrix,
-                     fieldOfView,
-                     aspect,
-                     zNear,
-                     zFar);
-
-    // Set the drawing position to the "identity" point, which is
-    // the center of the scene.
-    const modelViewMatrix = mat4.create();
-
-    // Now move the drawing position a bit to where we want to
-    // start drawing the square.
-
-    mat4.translate(modelViewMatrix,   // destination matrix
-                   modelViewMatrix,   // matrix to translate
-                   [0.0, 0.0, -6.0]); // amount to translate
-    
-    mat4.rotate(modelViewMatrix, modelViewMatrix, cubeRotation, [0, 0, 1]);
-    mat4.rotate(modelViewMatrix, modelViewMatrix, cubeRotation*0.7, [0, 1, 0]);
-
-    
+       
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
       
     gl.vertexAttribPointer(
@@ -198,11 +173,12 @@ function drawScene(gl, programInfo, buffers) {
     
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
     
-    gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
-    
     // Tell WebGL to use our program when drawing
     gl.useProgram(programInfo.program);
-
+    
+    mat4.mul(viewMatrix, rot, viewMatrix);
+    mat4.mul(modelViewMatrix, modelMatrix, viewMatrix);
+    
     // Set the shader uniforms
     gl.uniformMatrix4fv(
         programInfo.uniformLocations.projectionMatrix,
@@ -213,16 +189,76 @@ function drawScene(gl, programInfo, buffers) {
         false,
         modelViewMatrix);
     
-    cubeRotation += 0.01;
+    gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
     
     requestAnimationFrame( () => drawScene(gl, programInfo, buffers) );
 }
+
+
+function downFunc(e, prop) { 
+    
+    clicked = true;
+    prevClientX = prop.clientX;
+    prevClientY = prop.clientY;
+    mat4.identity(rot);
+}
+
+function moveFunc(e, prop) {
+    
+    if(clicked) {
+        e.preventDefault();
+        var dx = (prop.clientX - prevClientX)/300;
+        var dy = (prop.clientY - prevClientY)/300;
+        prevClientX = prop.clientX;
+        prevClientY = prop.clientY;
+        
+        var ds = vec3.fromValues(dx, dy, 0);
+        var axis = vec3.create();
+        vec3.cross(axis, ds, right);
+        
+        mat4.fromRotation(rot, -vec3.length(ds), axis);
+    }
+}
+
+function upFunc(e) {
+    clicked = false;
+}
+
+const modelMatrix = mat4.create();
+mat4.translate(modelMatrix, modelMatrix, [0.0, 0.0, 7.0]);
+    
+const viewMatrix = mat4.create();
+mat4.fromRotation(viewMatrix, 3.14159, [0, 1, 0]);
+    
+const rot = mat4.create();
+mat4.fromRotation(rot, 0.02, [-0.3,0.5,0.2]);
+    
+const modelViewMatrix = mat4.create();
+const projectionMatrix = mat4.create();
+
 
 const [canvas, gl]  = initgl();
 const shaderProgram = makeShaderProgram(gl, vsSource, fsSource);
 const buffers = initBuffers(gl);
 
-var cubeRotation = 0.0;
+canvas.addEventListener("mousedown", (e) => downFunc(e, e) );
+canvas.addEventListener("mousemove", (e) => moveFunc(e, e) );
+canvas.addEventListener("mouseup",   upFunc );
+
+canvas.addEventListener("touchstart", (e) => downFunc(e, e.touches[0]) );
+canvas.addEventListener("touchmove",  (e) => moveFunc(e, e.touches[0]) );
+canvas.addEventListener("touchend",   upFunc );
+    
+var clicked = false;
+
+var cubeRotationX = 0.0;
+var cubeRotationY = 0.0;
+
+var cubeAngvelX = 0.01;
+var cubeAngvelY = 0.02;
+
+var prevClientX = 0;
+var prevClientY = 0;
 
 const programInfo = {
     
@@ -230,7 +266,7 @@ const programInfo = {
     
     attribLocations: {
         vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
-        vertexColor: gl.getAttribLocation(shaderProgram, 'aVertexColor')
+        vertexColor:    gl.getAttribLocation(shaderProgram, 'aVertexColor')
     },
     
     uniformLocations: {
@@ -240,3 +276,5 @@ const programInfo = {
 };
 
 drawScene(gl, programInfo, buffers);
+    
+};
